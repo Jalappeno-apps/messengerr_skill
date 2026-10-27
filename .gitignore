@@ -1,0 +1,5 @@
+/.bundle/
+/dist/
+messengerr-preview.html
+*.tmp
+.DS_Store

@@ -1,0 +1,4 @@
+{"row_number":2,"contact":"a@x.com","status":"sent","reason":null,"provider_id":"m1","uncertain":false,"sent_at":"2026-10-27T00:00:00Z"}
+{"row_number":3,"contact":"b@x.com","status":"failed","reason":"invalid recipient","provider_id":null,"uncertain":false,"sent_at":"2026-10-27T00:00:01Z"}
+{"row_number":4,"contact":"c@x.com","status":"failed","reason":"read timeout","provider_id":null,"uncertain":true,"sent_at":"2026-10-27T00:00:02Z"}
+{"row_number":5,"contact":"d@x.com","status":"sent","rea
