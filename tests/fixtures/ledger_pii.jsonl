@@ -1,0 +1,2 @@
+{"row_number":6,"contact":"e@x.com","status":"failed","reason":"Found inactive addresses: bob@example.com. Inactive recipients are ones that have generated a hard bounce","provider_id":null,"uncertain":false,"sent_at":"2026-10-27T00:00:03Z"}
+{"row_number":7,"contact":"+12025550123","status":"failed","reason":"Invalid number +12025550123 (and 020 7946 0958)","provider_id":null,"uncertain":false,"sent_at":"2026-10-27T00:00:04Z"}

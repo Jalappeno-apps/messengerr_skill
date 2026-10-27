@@ -1,9 +1,19 @@
 #!/usr/bin/env ruby
 # ledger_summary.rb PATH
 # Summarises a messengerr send ledger (JSONL): counts by status, how many are
-# uncertain (may already be delivered — retrying can duplicate), and which row
-# numbers failed and why. Prints row numbers and reasons only, never contacts.
+# uncertain (may already be delivered, so retrying can duplicate), and which row
+# numbers failed and why. Prints row numbers and reasons only, never the
+# contact column. Provider error text can itself contain an address or phone
+# number ("inactive address bob@example.com"), so those are masked too.
 require "json"
+
+EMAIL = /[^\s@,;:<>()"'\[\]]+@[^\s@,;:<>()"'\[\]]*[^\s@,;:<>()"'\[\].]/
+PHONE = /\+?\d[\d\s().-]{6,}\d/
+MAX_REASON = 200
+
+def mask(text)
+  text.to_s.gsub(EMAIL, "[email]").gsub(PHONE, "[number]")[0, MAX_REASON]
+end
 
 path = ARGV[0]
 abort("usage: ledger_summary.rb PATH") if path.nil?
@@ -22,6 +32,8 @@ File.readlines(path, chomp: true).each do |line|
       torn += 1
       next
     end
+  next torn += 1 unless entry.is_a?(Hash)
+
   status = entry["status"] || "unknown"
   counts[status] += 1
   uncertain += 1 if entry["uncertain"]
@@ -37,6 +49,6 @@ unless failures.empty?
   puts "failures:"
   failures.each do |f|
     flag = f["uncertain"] ? " [uncertain]" : ""
-    puts "  row #{f['row_number']}: #{f['reason']}#{flag}"
+    puts "  row #{f['row_number']}: #{mask(f['reason'])}#{flag}"
   end
 end

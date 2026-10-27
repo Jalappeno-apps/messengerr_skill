@@ -1,15 +1,29 @@
 name: Release
 
+# Tag vX.Y.Z (it must match the plugin version and have a dated CHANGELOG entry).
+# CI builds the tarball ONCE and attaches it with its .sha256. The messengerr gem
+# must pin the hash of THIS released asset, never one built on a laptop (zlib can
+# differ between machines, so the compressed bytes can too).
+
 on:
   push:
-    tags: ["v*"]
+    tags: [ "v*" ]
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Optional: create an environment named "release" with required reviewers to add an approval step.
+    environment: release
+    permissions:
+      contents: write   # create the GitHub release
     steps:
       - uses: actions/checkout@v4
 
@@ -17,29 +31,48 @@ jobs:
         with:
           ruby-version: "3.3"
 
-      - name: Install shellcheck + jq
-        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+      - name: Tag, versions and changelog agree
+        run: ruby build/check_release.rb "$GITHUB_REF_NAME"
 
-      - name: Validate manifests + frontmatter
+      - name: Shellcheck the scripts
+        run: shellcheck -x skills/messengerr/scripts/*.sh
+
+      - name: Install the messengerr CLI version the docs were generated from
+        run: gem install messengerr -v "$(cat .messengerr-version)" --no-document
+
+      - name: Tests (against the real CLI)
+        run: MESSENGERR_BIN=messengerr rake test
+
+      - name: references/commands.md matches the real CLI
         run: |
-          ruby -rjson -e 'JSON.parse(File.read(".claude-plugin/plugin.json")); JSON.parse(File.read(".claude-plugin/marketplace.json"))'
-          ruby -ryaml -e 'y = YAML.safe_load(File.read("skills/messengerr/SKILL.md")[/\A---\n(.*?)\n---/m, 1]); abort unless y["name"] && y["description"]'
+          MESSENGERR_BIN=messengerr ruby build/generate_commands.rb
+          git diff --exit-code -- skills/messengerr/references/commands.md .messengerr-version
 
-      - name: Tag version matches plugin version
+      - name: Build the release tarball
         run: |
-          tag=${GITHUB_REF_NAME#v}
-          plugin=$(ruby -rjson -e 'puts JSON.parse(File.read(".claude-plugin/plugin.json"))["version"]')
-          test "$tag" = "$plugin" || { echo "tag $tag != plugin version $plugin"; exit 1; }
+          ruby build/build_tarball.rb "${GITHUB_REF_NAME#v}"
+          (cd dist && sha256sum -c "messengerr-skill-${GITHUB_REF_NAME#v}.tar.gz.sha256")
 
-      - name: Run tests
-        run: rake test
+      - name: Release notes from the changelog
+        run: ruby build/check_release.rb "$GITHUB_REF_NAME" --notes > release-notes.md
 
-      - name: Build release tarball
-        run: ruby build/build_tarball.rb "${GITHUB_REF_NAME#v}"
+      - name: Show the hash the gem must pin
+        run: |
+          {
+            echo "### Release asset"
+            echo
+            echo "Pin this SHA-256 in the messengerr gem (it is the hash of the asset attached to this release):"
+            echo
+            echo '```'
+            cat "dist/messengerr-skill-${GITHUB_REF_NAME#v}.tar.gz.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish release with assets
-        uses: softprops/action-gh-release@v2
+      # Third-party action pinned to a commit, not a movable tag (v3.0.3).
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
           files: |
             dist/messengerr-skill-*.tar.gz
             dist/messengerr-skill-*.tar.gz.sha256

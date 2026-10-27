@@ -2,49 +2,43 @@ name: CI
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: Ruby ${{ matrix.ruby }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [ "3.2", "3.3", "3.4" ]
     steps:
       - uses: actions/checkout@v4
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: ${{ matrix.ruby }}
 
-      - name: Install shellcheck + jq
-        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
-
-      - name: Validate JSON manifests
-        run: |
-          ruby -rjson -e 'JSON.parse(File.read(".claude-plugin/plugin.json")); JSON.parse(File.read(".claude-plugin/marketplace.json")); JSON.parse(File.read("hooks/hooks.json"))'
-
-      - name: Validate SKILL.md frontmatter
-        run: |
-          ruby -ryaml -e '
-            md = File.read("skills/messengerr/SKILL.md")
-            fm = md[/\A---\n(.*?)\n---/m, 1] or abort("no frontmatter")
-            y = YAML.safe_load(fm)
-            abort("missing name/description") unless y["name"] && y["description"]
-            abort("description over 1536 chars") if y["description"].length > 1536
-          '
-
-      - name: Shellcheck scripts
+      - name: Shellcheck the scripts
         run: shellcheck -x skills/messengerr/scripts/*.sh
 
-      - name: Run script tests
-        run: rake test
+      - name: Install the messengerr CLI version the docs were generated from
+        run: gem install messengerr -v "$(cat .messengerr-version)" --no-document
 
-      - name: Tarball build is reproducible
+      - name: Tests (against the real CLI)
+        run: MESSENGERR_BIN=messengerr rake test
+
+      - name: references/commands.md matches the real CLI
         run: |
-          ruby build/build_tarball.rb 0.0.0-ci
-          sha256sum dist/messengerr-skill-0.0.0-ci.tar.gz > /tmp/first.sha
-          rm dist/messengerr-skill-0.0.0-ci.tar.gz
-          sleep 1
-          ruby build/build_tarball.rb 0.0.0-ci
-          sha256sum -c /tmp/first.sha
-
-      - name: commands.md is generated and current (when messengerr >= 0.2.0 is installed)
-        run: gem install messengerr && ruby build/generate_commands.rb && git diff --exit-code skills/messengerr/references/commands.md || true
+          MESSENGERR_BIN=messengerr ruby build/generate_commands.rb
+          git diff --exit-code -- skills/messengerr/references/commands.md .messengerr-version

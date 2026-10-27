@@ -3,6 +3,7 @@ $LOAD_PATH.unshift File.expand_path(__dir__)
 require "minitest/autorun"
 require "open3"
 require "json"
+require "shellwords"
 
 ROOT = File.expand_path("..", __dir__)
 SCRIPTS = File.join(ROOT, "skills/messengerr/scripts")

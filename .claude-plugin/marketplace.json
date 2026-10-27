@@ -1,8 +1,8 @@
 {
   "name": "messengerr",
   "owner": {
-    "name": "Jalappeno Apps",
-    "url": "https://github.com/Jalappeno-apps"
+    "name": "Daiwick",
+    "url": "https://daiwick.com"
   },
   "plugins": [
     {
@@ -11,7 +11,7 @@
       "description": "Prepare, preview and troubleshoot bulk email/SMS sends from a CSV with the messengerr CLI.",
       "version": "0.1.0",
       "author": {
-        "name": "Jalappeno Apps"
+        "name": "Daiwick"
       },
       "license": "MIT"
     }

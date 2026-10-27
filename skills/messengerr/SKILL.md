@@ -2,47 +2,47 @@
 name: messengerr
 description: >
   Prepare, preview, and troubleshoot bulk email/SMS sends from a CSV with the
-  `messengerr` CLI — mail merges, newsletters, letterhead emails, dry runs,
-  and ledger/resume after an interrupted send. Triggers on: send a campaign or
-  newsletter to a contact list, SMS a list, mail-merge from a CSV, "messengerr",
-  letterhead email, retry/resume a failed bulk send. Claude prepares and
-  dry-runs — the human always sends.
-allowed-tools:
-  - "Bash(messengerr --version)"
-  - "Bash(messengerr credentials list)"
-  - "Bash(messengerr integrations)"
-  - "Bash(messengerr send --help)"
-  - "Bash(*csv_check.rb*)"
-  - "Bash(*ledger_summary.rb*)"
-  - "Bash(*dry_run.sh*)"
+  `messengerr` CLI: mail merges, newsletters, letterhead emails, dry runs, and
+  resuming an interrupted send. Use when the user wants to send a campaign or
+  newsletter to a contact list, SMS a list, mail-merge from a CSV, mentions
+  "messengerr", wants an HTML letterhead email, or needs to retry or resume a
+  failed bulk send. Claude prepares and dry-runs; the human always sends.
+allowed-tools: >-
+  Bash(messengerr --version)
+  Bash(messengerr credentials list)
+  Bash(messengerr integrations)
+  Bash(messengerr send --help)
+  Bash(${CLAUDE_SKILL_DIR}/scripts/csv_check.rb *)
+  Bash(${CLAUDE_SKILL_DIR}/scripts/dry_run.sh *)
+  Bash(${CLAUDE_SKILL_DIR}/scripts/ledger_summary.rb *)
 hooks:
   PreToolUse:
-    - matcher: "Bash"
+    - matcher: "Bash|Read|Grep|Glob|Edit|Write"
       hooks:
         - type: command
           command: |
-            # Inline guard: block real sends and credential access while this
-            # skill is active. Self-contained — uses no external files.
-            # Exit 2 blocks; anything else is non-blocking (fails open).
+            # Guard: block real sends and credential access while this skill is active.
+            # Runs scripts/guard.rb when it can find it; otherwise a strict built-in rule.
+            # Exit 2 blocks. Any other exit lets the call through, so this is a seatbelt,
+            # not the safety mechanism: the CLI's own terminal check is the backstop.
+            d=""
+            for c in "${CLAUDE_SKILL_DIR:-}" "${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/skills/messengerr}" \
+                     "$HOME/.claude/skills/messengerr" "${CLAUDE_PROJECT_DIR:-.}/.claude/skills/messengerr"; do
+              if [ -n "$c" ] && [ -f "$c/scripts/guard.rb" ]; then d="$c"; break; fi
+            done
+            if [ -n "$d" ] && command -v ruby >/dev/null 2>&1; then exec ruby "$d/scripts/guard.rb"; fi
             input=$(cat)
-            if command -v jq >/dev/null 2>&1; then
-              cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
-            else
-              cmd=$(printf '%s' "$input" | tr '\n' ' ' | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"\(.*\)"[[:space:]]*,\?[[:space:]]*}.*/\1/p')
-            fi
-            [ -z "${cmd:-}" ] && exit 0
-            case "$cmd" in
-              *master.key*|*credentials.yml.enc*|*MESSENGERR_MASTER_KEY*|*.config/messengerr*)
-                echo "messengerr guard: never touch credential files or the master key" >&2; exit 2;;
-            esac
-            case "$cmd" in
-              *--allow-non-interactive*)
-                echo "messengerr guard: '--allow-non-interactive' is not for this skill" >&2; exit 2;;
+            deny() { echo "messengerr guard: $1" >&2; exit 2; }
+            case "$input" in
               *messengerr*send*)
-                case "$cmd" in
-                  *--dry-run*|*--help*|*-h*) : ;;
-                  *) echo "messengerr guard: 'messengerr send' without --dry-run is blocked — the human sends" >&2; exit 2;;
-                esac;;
+                case "$input" in
+                  *'&&'*|*'||'*|*';'*|*'|'*|*'$('*|*'`'*|*'\n'*|*'#'*|*allow-non-interactive*)
+                    deny "refusing a compound or unclear 'messengerr send' (guard.rb not found; strict mode)" ;;
+                  *' --dry-run'*|*' --help'*|*' -h"'*|*' -h '*) : ;;
+                  *) deny "refusing 'messengerr send' without --dry-run. Claude prepares and dry-runs; the human sends." ;;
+                esac ;;
+              *credentials*setup*|*credentials*delete*|*.config/messengerr*|*MESSENGERR_MASTER_KEY*)
+                deny "refusing to touch the messengerr credentials; the human manages them." ;;
             esac
             exit 0
 metadata:
@@ -52,30 +52,32 @@ metadata:
 
 # Messengerr: prepare bulk sends, never send them
 
-`messengerr` is a CLI that sends templated email/SMS to a CSV contact list.
-This skill helps the user prepare a send — inspect the CSV, write the message,
-preview the rendered output — and troubleshoot a completed run. **Every real
-send is done by the human**, in their own terminal.
+`messengerr` is a command-line tool that sends templated email or SMS to the
+people in a CSV file. This skill helps the user prepare a send: inspect the CSV,
+write the message, and preview exactly what will go out. It also helps read the
+result afterwards. **Every real send is done by the human**, in their own
+terminal.
 
-## Hard rules — these are not negotiable
+## Hard rules
 
-- **Never run `messengerr send` without `--dry-run`.** Not "to test", not for
-  one recipient, not ever. Prepare, dry-run, then hand the user the exact
-  command to run themselves.
-- **Never read, print, ask for, or write credentials.** That includes
+- **Never run `messengerr send` without `--dry-run`.** Not to test, not for one
+  recipient, not ever. Prepare, dry-run, then hand the user the exact command.
+  (The CLI itself refuses a real send without an interactive terminal, and a
+  guard hook blocks the attempt. Do not try to get around either.)
+- **Never read, print, ask for or write credentials.** That includes
   `~/.config/messengerr/`, `credentials.yml.enc`, `master.key`, and the
-  `MESSENGERR_MASTER_KEY` environment variable. Credential setup is
-  `messengerr credentials setup <name>` — run **by the human**.
-- **Never paste a full contact list into the conversation.** Counts, headers,
+  `MESSENGERR_MASTER_KEY` variable. Do not run `messengerr credentials setup`
+  or `delete`: those are for the human. If no integration is configured, tell
+  them to run `messengerr credentials setup <name>` themselves.
+- **Never paste a contact list into the conversation.** Use counts, headers,
   row numbers, and at most the few previewed messages the user asked to see.
-- **Never suggest bypassing a safeguard** — no `--allow-non-interactive`, no
-  editing credential files, no piping `yes` into the send wizard.
-- **Compliance is the sender's job.** When relevant, remind the user they need
-  recipients' consent and a working unsubscribe/opt-out path (CAN-SPAM,
-  GDPR/PECR, TCPA for SMS).
-- **Don't invent features.** If something seems missing, check
-  `messengerr send --help` or the references below — and see
-  `references/troubleshooting.md` and the gem's `limitations` docs.
+- **Never suggest bypassing a safeguard:** no `--allow-non-interactive`, no
+  faking a terminal, no editing credential files.
+- **Compliance is the sender's job.** Remind the user, when relevant, that they
+  need consent from recipients and a working opt-out (CAN-SPAM, GDPR/PECR, and
+  TCPA for SMS). The letterhead template does not add an unsubscribe link.
+- **Do not invent features.** Check `messengerr send --help` and
+  `references/commands.md`. Gaps are listed in the gem's Limitations docs.
 
 ## Workflow
 
@@ -85,19 +87,19 @@ send is done by the human**, in their own terminal.
 messengerr --version
 ```
 
-Missing? Tell the user to run `gem install messengerr`. Below 0.2.0? The
-flag-based dry-run path won't work — ask them to `gem update messengerr`.
+Missing? Ask the user to run `gem install messengerr`. Older than 0.2.0? The
+flags used below do not exist: ask them to run `gem update messengerr`.
 
-### 2. Check configuration — read-only
+### 2. Check what is configured (read-only)
 
 ```bash
 messengerr credentials list
 messengerr integrations
 ```
 
-"Configured" means credentials exist. If nothing is configured for the needed
-method, stop and tell the user to run `messengerr credentials setup <name>`
-themselves — do not run it, do not ask for tokens.
+"Configured" means credentials are stored. If nothing is configured for the
+delivery method the user needs, stop and tell them to run
+`messengerr credentials setup <name>` themselves.
 
 ### 3. Inspect the CSV
 
@@ -105,22 +107,22 @@ themselves — do not run it, do not ask for tokens.
 ${CLAUDE_SKILL_DIR}/scripts/csv_check.rb /path/to/contacts.csv
 ```
 
-Reports headers, duplicate headers (the CLI rejects those), blank rows, and
-per-column empty counts — counts only, never contact values. One data row
-= one message. Flag bad shapes before writing anything else.
+Reports headers, duplicate headers (messengerr rejects those), blank rows and
+empty cells per column: counts only, never contact values. **One row is one
+message**: a repeated address is sent to once per row, so mention duplicates.
 
 ### 4. Help write the message
 
-Three forms, all flag-driven (see `references/commands.md`):
+Three ways to give messengerr the message (see `references/commands.md`):
 
-- **One-liner** — `--message "Hi {{name}}, ..."`
-- **File** — `--message-file copy.txt` for multi-line plain text
-- **HTML** — `--html letterhead.html` for HTML email (email only; the CLI
-  refuses it for integrations that can't send HTML)
+- **One line:** `--message "Hi {{name}}, ..."`
+- **Several lines:** `--message-file copy.txt` (plain text, email or SMS)
+- **HTML email:** `--html letter.html` (email only, and only for integrations
+  that can send HTML; it is HTML only, with no plain-text version)
 
-Placeholders are `{{column_name}}`, logic-free — no loops, no conditionals.
-Every `{{placeholder}}` in the message **and** the subject gets mapped to a CSV
-column at send time. Rules and escaping: `references/templates.md`. HTML email
+Placeholders are `{{column_name}}` and nothing else: no logic, no loops, no
+conditionals. Every placeholder in the message **and** the subject needs a
+`--map placeholder=column`. Rules and escaping: `references/templates.md`. HTML
 recipe and client quirks: `references/html-email.md`; a neutral starter is
 `assets/letterhead-template.html`.
 
@@ -132,25 +134,29 @@ ${CLAUDE_SKILL_DIR}/scripts/dry_run.sh \
   --map name=name --message-file copy.txt --subject "Welcome, {{name}}"
 ```
 
-The script forces `--dry-run` and refuses `--allow-non-interactive`. Read the
-preview aloud: recipient count, defects/drops, and the first rendered messages
-(for HTML, the generated `messengerr-preview.html` — offer to open it). If the
-preview is wrong, fix the message or mapping and dry-run again.
+The script forces `--dry-run`, never prompts (give it every flag), and stops with
+a clear error if a flag is missing. Read the result back to the user: the number
+of recipients, any contacts with defects (they are listed and dropped for the
+preview), and the first rendered messages. For HTML it writes
+`messengerr-preview.html` in the current directory: offer to open it.
 
-### 6. Hand off — the human sends
+If a row cannot be rendered (an unmapped placeholder or an empty cell), the
+**whole run stops** with that row's number. Fix the CSV or the mapping and dry-run
+again. A dry run costs nothing and sends nothing.
 
-Print the **exact command** for the user to run in their own terminal, same
-flags minus the helper script:
+### 6. Hand off: the human sends
 
-```bash
-messengerr send --method email --csv contacts.csv --contact email \
-  --map name=name --message-file copy.txt --subject "Welcome, {{name}}"
-```
+The script ends by printing the command for the real send. Give it to the user
+exactly as printed, and tell them:
 
-Tell them what to expect: the preview shows again, they confirm, sends are
-recorded in a JSONL ledger (`./messengerr-ledger-<time>.jsonl`, `--ledger` to
-choose), Ctrl-C or a crash is safe — rerun with `--resume <ledger>` to skip
-already-sent contacts.
+- Run it **in their own terminal window** (a real send is refused anywhere else).
+- messengerr shows the preview again and asks `Send N message(s)? [y/n]`.
+  Nothing goes out until they type `y`.
+- Results are written to a ledger (`./messengerr-ledger-<time>.jsonl`, or
+  `--ledger PATH`) as each one lands. If the run is interrupted, they run the
+  same command again with `--resume <ledger>`.
+- **Do not edit the CSV between the run and a resume**: resume matches by row
+  number plus contact, so changed rows can be skipped or sent twice.
 
 ### 7. Afterwards
 
@@ -158,26 +164,26 @@ already-sent contacts.
 ${CLAUDE_SKILL_DIR}/scripts/ledger_summary.rb messengerr-ledger-<time>.jsonl
 ```
 
-Counts sent/failed/uncertain and lists failed rows with reasons.
-**Uncertain** failures (timeouts, unreadable responses) may already be
-delivered — warn the user before they retry those. Details:
-`references/ledger-and-resume.md`.
+Counts sent, failed and uncertain, and lists failed rows with their reasons
+(addresses and numbers are masked). **Uncertain** failures (timeouts, dropped
+connections, server errors) may already have been delivered: warn the user that
+retrying them can send duplicates, and suggest checking the provider's activity
+log first. Details: `references/ledger-and-resume.md`.
 
 ## What goes wrong most
 
-- Wrong column mapping → placeholders still in the output or wrong values in
-  the preview. The dry-run exists to catch this; the send itself refuses rows
-  that render badly.
-- Local phone numbers without `MESSENGERR_DEFAULT_COUNTRY` → "invalid phone
-  number" defects.
-- `--html` to an SMS method → the CLI refuses; pick a text message instead.
-- "Refusing to send without an interactive terminal" — correct behaviour; the
-  user runs the command themselves.
+- A column mapped to the wrong header: the preview shows wrong values or the run
+  stops at the first row that cannot render. That is what the dry run is for.
+- Local-format phone numbers without `MESSENGERR_DEFAULT_COUNTRY`: every number
+  is reported as invalid. The user sets the variable (for example `US`).
+- `--html` with SMS, or with an integration that cannot send HTML: refused.
+- "refusing to send without an interactive terminal": correct behaviour. The
+  human runs the command in their own terminal.
 
 ## References
 
-- `references/commands.md` — every command, flag, exit code
-- `references/templates.md` — `{{placeholder}}` rules
-- `references/html-email.md` — email-safe HTML
-- `references/ledger-and-resume.md` — ledger fields, uncertain failures, resume
-- `references/troubleshooting.md` — real error messages → cause → fix
+- `references/commands.md`: every command, flag and exit code
+- `references/templates.md`: `{{placeholder}}` rules
+- `references/html-email.md`: email-safe HTML
+- `references/ledger-and-resume.md`: ledger fields, uncertain failures, resume
+- `references/troubleshooting.md`: messages, causes and fixes

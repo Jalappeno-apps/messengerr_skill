@@ -1,10 +1,17 @@
 {
-  "hooks": [
-    {
-      "type": "command",
-      "event": "PreToolUse",
-      "matcher": "Bash",
-      "command": "${CLAUDE_PLUGIN_ROOT}/skills/messengerr/scripts/guard_send.sh"
-    }
-  ]
+  "description": "Blocks real `messengerr send` and access to the messengerr credentials while this plugin is enabled. A seatbelt, not a security boundary: the CLI's own terminal check is the backstop.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Glob|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruby",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/skills/messengerr/scripts/guard.rb"]
+          }
+        ]
+      }
+    ]
+  }
 }
