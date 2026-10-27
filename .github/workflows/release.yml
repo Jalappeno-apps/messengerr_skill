@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+
+      - name: Install shellcheck + jq
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+
+      - name: Validate manifests + frontmatter
+        run: |
+          ruby -rjson -e 'JSON.parse(File.read(".claude-plugin/plugin.json")); JSON.parse(File.read(".claude-plugin/marketplace.json"))'
+          ruby -ryaml -e 'y = YAML.safe_load(File.read("skills/messengerr/SKILL.md")[/\A---\n(.*?)\n---/m, 1]); abort unless y["name"] && y["description"]'
+
+      - name: Tag version matches plugin version
+        run: |
+          tag=${GITHUB_REF_NAME#v}
+          plugin=$(ruby -rjson -e 'puts JSON.parse(File.read(".claude-plugin/plugin.json"))["version"]')
+          test "$tag" = "$plugin" || { echo "tag $tag != plugin version $plugin"; exit 1; }
+
+      - name: Run tests
+        run: rake test
+
+      - name: Build release tarball
+        run: ruby build/build_tarball.rb "${GITHUB_REF_NAME#v}"
+
+      - name: Publish release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/messengerr-skill-*.tar.gz
+            dist/messengerr-skill-*.tar.gz.sha256
