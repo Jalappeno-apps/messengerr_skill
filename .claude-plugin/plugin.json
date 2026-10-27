@@ -1,0 +1,12 @@
+{
+  "name": "messengerr",
+  "version": "0.1.0",
+  "description": "Prepare, preview and troubleshoot bulk email/SMS sends from a CSV with the messengerr CLI. Prepares and dry-runs only — the human always sends.",
+  "author": {
+    "name": "Jalappeno Apps"
+  },
+  "homepage": "https://github.com/Jalappeno-apps/messengerr_skill",
+  "repository": "https://github.com/Jalappeno-apps/messengerr_skill",
+  "license": "MIT",
+  "skills": "./skills"
+}
